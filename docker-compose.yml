@@ -3,12 +3,16 @@ services:
     image: ghcr.io/saavuori/elenia-data-collector:latest
     container_name: elenia-collector
     restart: unless-stopped
-    ports:
-      - "3000:3000"
-    # To run behind a reverse proxy (like Caddy), uncomment the networks section below
-    # and the external network definition at the bottom of this file.
-    # networks:
-    #   - web-proxy
+    # Reached by container name through the shared web-proxy network, so no
+    # host port is published. See caddy-proxy for the matching vhost route:
+    # https://github.com/Saavuori/caddy-proxy
+    #
+    # To run standalone without a reverse proxy, uncomment the ports block.
+    # Pick a free host port — 3000 and 8080 are commonly already taken.
+    # ports:
+    #   - "3001:3000"
+    networks:
+      - web-proxy
     volumes:
       - ./credentials.json:/app/credentials.json
       - ./influx_config.json:/app/influx_config.json
@@ -31,7 +35,6 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.scope=elenia-collector"
 
-# To run behind a reverse proxy, uncomment the lines below:
-# networks:
-#   web-proxy:
-#     external: true
+networks:
+  web-proxy:
+    external: true

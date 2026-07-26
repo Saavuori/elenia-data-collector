@@ -32,8 +32,24 @@ if [ ! -f influx_config.json ]; then
 EOF
 fi
 
+echo "==> Checking docker network 'web-proxy'..."
+if ! docker network inspect web-proxy >/dev/null 2>&1; then
+  echo "==> Creating 'web-proxy' external docker network..."
+  docker network create web-proxy
+else
+  echo "==> 'web-proxy' docker network already exists, skipping."
+fi
+
 echo ""
 echo "==> Done! Next steps:"
 echo "  1. Start the collector:  docker compose up -d"
-echo "  2. Open the Web UI:      http://\$(hostname -I | awk '{print \$1}'):3000"
+echo "  2. Add the route to your caddy-proxy Caddyfile, then reload Caddy:"
+echo "       redir /eleniadatacollector /eleniadatacollector/"
+echo "       handle_path /eleniadatacollector* {"
+echo "           reverse_proxy elenia-collector:3000"
+echo "       }"
+echo "     Open the Web UI at https://<your-domain>/eleniadatacollector/"
 echo "  3. Log in with your Elenia Aina credentials via the Web UI"
+echo ""
+echo "  Not using a reverse proxy? Uncomment the 'ports' block in"
+echo "  docker-compose.yml and browse to http://\$(hostname -I | awk '{print \$1}'):3001"

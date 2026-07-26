@@ -44,12 +44,29 @@ docker compose up -d
 
 ### 3. Open the web UI
 
+The container publishes **no host port** by default — it joins the shared
+`web-proxy` Docker network and is reached by container name through a reverse
+proxy. With [caddy-proxy](https://github.com/Saavuori/caddy-proxy), add:
+
 ```
-http://<your-device-ip>:3000
+redir /eleniadatacollector /eleniadatacollector/
+
+handle_path /eleniadatacollector* {
+    reverse_proxy elenia-collector:3000
+}
 ```
+
+then reload Caddy and open `https://<your-domain>/eleniadatacollector/`.
+
+**No reverse proxy?** Uncomment the `ports` block in `docker-compose.yml` and
+browse to `http://<your-device-ip>:3001`. Pick a port that is actually free —
+3000 and 8080 are commonly taken by other self-hosted services.
 
 Log in with your **Elenia Aina** email and password. Your credentials are saved
 locally so the app logs in automatically on restart.
+
+The frontend is built with relative asset paths and relative API calls, so it
+works correctly under any path prefix without extra configuration.
 
 ---
 
@@ -62,6 +79,10 @@ anything else you run. Just keep it in its own directory:
 ~/helen-collector/     ← HelenFlow
 ~/elenia-collector/    ← EleniaFlow
 ```
+
+Both can keep their internal port `3000`: on the `web-proxy` network they are
+addressed by container name, so only the container name and URL path need to be
+unique.
 
 ---
 
