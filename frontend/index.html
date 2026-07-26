@@ -3,7 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="apple-touch-icon" href="./favicon.svg" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <!-- viewport-fit=cover lets the layout paint under the notch; the safe-area
+         insets in the CSS keep the controls clear of it. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#090C09" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="EleniaFlow" />
+    <meta
+      name="description"
+      content="Follow your Elenia electricity consumption, spot prices and costs."
+    />
     <title>EleniaFlow — Electricity Data Collector</title>
   </head>
   <body>

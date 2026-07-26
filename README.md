@@ -10,6 +10,7 @@ dashboard. Optionally exports data to InfluxDB.
 
 - ⚡ **Near Real-Time** — 5-minute consumption straight from the meter registers, typically only 10–20 minutes behind
 - 📊 **Interactive Dashboard** — 5-minute, 15-minute, hourly, daily and monthly consumption charts with Nord Pool spot prices (VAT incl./excl.)
+- 📱 **Mobile-First UI** — touch-friendly layout with a bottom tab bar, light/dark themes, safe-area support and an installable web app manifest; scales up to a full desktop dashboard
 - 🏡 **Metering Point Discovery** — lists every delivery site on your Elenia account and lets you pick the active one
 - 🔄 **Automatic Session Refresh** — handles Elenia Aina's cookie/CSRF login and keeps the measurement API session alive in the background
 - 📡 **InfluxDB Export** — optional background sync of yesterday's and today's consumption data to your local/remote InfluxDB instance
@@ -88,9 +89,9 @@ unique.
 
 ## InfluxDB Export & Settings (Optional)
 
-Open **Settings** (gear icon) in the UI to select your metering point and
-configure InfluxDB export. The collector then syncs yesterday's and today's
-5-minute consumption data to InfluxDB on the configured interval.
+Pick the delivery site you want to follow on the **Sites** tab, then configure
+InfluxDB export on the **Settings** tab. The collector syncs yesterday's and
+today's 5-minute consumption data to InfluxDB on the configured interval.
 
 Data is written using this schema:
 

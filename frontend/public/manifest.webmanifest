@@ -1,0 +1,19 @@
+{
+  "name": "EleniaFlow — Electricity Data Collector",
+  "short_name": "EleniaFlow",
+  "description": "Follow your Elenia electricity consumption, spot prices and costs.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#090C09",
+  "theme_color": "#090C09",
+  "icons": [
+    {
+      "src": "./favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    }
+  ]
+}
