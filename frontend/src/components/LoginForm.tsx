@@ -6,17 +6,13 @@ import {
   Input,
   Button,
   Spinner,
-  Text,
   MessageBar,
   MessageBarBody,
-  tokens,
   makeStyles,
 } from '@fluentui/react-components';
-import {
-  DataBarVertical24Regular,
-  PersonKey24Regular,
-} from '@fluentui/react-icons';
-import { SERIES } from '../theme';
+import { ShieldCheckmark20Regular } from '@fluentui/react-icons';
+import Logo from './Logo';
+import { errorText } from '../api';
 
 interface LoginFormProps {
   onLoginSuccess: () => void;
@@ -25,43 +21,65 @@ interface LoginFormProps {
 const useStyles = makeStyles({
   wrapper: {
     display: 'flex',
-    alignItems: 'center',
+    flexDirection: 'column',
     justifyContent: 'center',
-    flex: 1,
-    padding: '4rem 1rem',
+    minHeight: 'calc(100dvh - 160px)',
+    padding: '8px 0 24px',
   },
   card: {
     width: '100%',
-    maxWidth: '440px',
-    padding: tokens.spacingVerticalXXL,
-    boxShadow: tokens.shadow16,
-    borderRadius: tokens.borderRadiusXLarge,
-    background: tokens.colorNeutralBackground2,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    maxWidth: '420px',
+    margin: '0 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '24px',
+    '@media (min-width: 768px)': {
+      padding: '32px',
+      borderRadius: '24px',
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
+      boxShadow: 'var(--shadow-raised)',
+    },
   },
   hero: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    marginBottom: tokens.spacingVerticalXXL,
-    gap: tokens.spacingVerticalM,
     textAlign: 'center',
+    gap: '12px',
   },
-  iconRing: {
-    width: '64px',
-    height: '64px',
-    borderRadius: '50%',
-    background: `linear-gradient(135deg, ${SERIES.energy}, #2f7d32)`,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: tokens.shadow8,
-    fontSize: '32px',
+  title: {
+    fontSize: '26px',
+    fontWeight: 700,
+    letterSpacing: '-0.03em',
+    lineHeight: 1.15,
+  },
+  subtitle: {
+    fontSize: '14px',
+    lineHeight: 1.5,
+    color: 'var(--text-muted)',
+    maxWidth: '300px',
   },
   form: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
+    gap: '16px',
+  },
+  submit: {
+    width: '100%',
+    height: '48px',
+    justifyContent: 'center',
+    borderRadius: '14px',
+    fontWeight: 650,
+  },
+  note: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    fontSize: '12px',
+    color: 'var(--text-faint)',
+    textAlign: 'center',
   },
 });
 
@@ -77,11 +95,10 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
     onSuccess: onLoginSuccess,
   });
 
-  // The backend passes Elenia's own error text through, which is far more
-  // useful than a generic "login failed".
-  const errorMessage =
-    (loginMutation.error as any)?.response?.data ||
-    'Login failed — please check your credentials.';
+  const errorMessage = errorText(
+    loginMutation.error,
+    'Login failed — please check your credentials.',
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,13 +109,11 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
     <div className={styles.wrapper}>
       <div className={styles.card}>
         <div className={styles.hero}>
-          <div className={styles.iconRing}>
-            <DataBarVertical24Regular style={{ color: 'white' }} />
-          </div>
-          <Text size={700} weight="semibold">EleniaFlow</Text>
-          <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
-            Sign in with your Elenia Aina credentials to access your energy insights
-          </Text>
+          <Logo size={56} radius={16} />
+          <span className={styles.title}>Welcome back</span>
+          <span className={styles.subtitle}>
+            Sign in with your Elenia Aina account to follow your electricity use.
+          </span>
         </div>
 
         <form onSubmit={handleSubmit} className={styles.form}>
@@ -106,11 +121,14 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
             <Input
               id="login-email"
               type="email"
+              inputMode="email"
+              autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
               value={username}
               onChange={e => setUsername(e.target.value)}
               placeholder="your@email.com"
               size="large"
-              appearance="outline"
             />
           </Field>
 
@@ -118,17 +136,17 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
             <Input
               id="login-password"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="••••••••"
               size="large"
-              appearance="outline"
             />
           </Field>
 
           {loginMutation.isError && (
             <MessageBar intent="error">
-              <MessageBarBody>{String(errorMessage)}</MessageBarBody>
+              <MessageBarBody>{errorMessage}</MessageBarBody>
             </MessageBar>
           )}
 
@@ -136,13 +154,18 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
             type="submit"
             appearance="primary"
             size="large"
-            disabled={loginMutation.isPending}
-            icon={loginMutation.isPending ? <Spinner size="tiny" /> : <PersonKey24Regular />}
-            style={{ width: '100%', justifyContent: 'center' }}
+            disabled={loginMutation.isPending || !username || !password}
+            icon={loginMutation.isPending ? <Spinner size="tiny" /> : undefined}
+            className={styles.submit}
           >
-            {loginMutation.isPending ? 'Signing in…' : 'Sign In'}
+            {loginMutation.isPending ? 'Signing in…' : 'Sign in'}
           </Button>
         </form>
+
+        <span className={styles.note}>
+          <ShieldCheckmark20Regular fontSize={16} />
+          Signs in to Elenia Aina through your own EleniaFlow server.
+        </span>
       </div>
     </div>
   );
