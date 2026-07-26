@@ -1,0 +1,27 @@
+# Version control
+.git
+.gitignore
+.github
+
+# Rust build artifacts
+backend/target
+backend/target_new
+
+# Node.js dependencies and build output
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# IDE settings
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Local configuration (mounted at runtime via docker-compose volumes)
+backend/credentials.json
+backend/influx_config.json
+
+# Debug scripts
+*.py

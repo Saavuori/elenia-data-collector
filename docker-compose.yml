@@ -1,0 +1,37 @@
+services:
+  elenia-collector:
+    image: ghcr.io/saavuori/elenia-data-collector:latest
+    container_name: elenia-collector
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # To run behind a reverse proxy (like Caddy), uncomment the networks section below
+    # and the external network definition at the bottom of this file.
+    # networks:
+    #   - web-proxy
+    volumes:
+      - ./credentials.json:/app/credentials.json
+      - ./influx_config.json:/app/influx_config.json
+    labels:
+      - "com.centurylinklabs.watchtower.scope=elenia-collector"
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower-elenia
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_SCOPE=elenia-collector
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_LOG_LEVEL=info
+      # Matches the docker API version. If you hit issues, you can remove this or set it dynamically.
+      - DOCKER_API_VERSION=1.45
+    labels:
+      - "com.centurylinklabs.watchtower.scope=elenia-collector"
+
+# To run behind a reverse proxy, uncomment the lines below:
+# networks:
+#   web-proxy:
+#     external: true

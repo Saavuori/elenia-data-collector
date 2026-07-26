@@ -1,0 +1,8 @@
+{
+  "url": "http://localhost:8086",
+  "token": "YOUR_INFLUXDB_TOKEN",
+  "org": "YOUR_INFLUXDB_ORG",
+  "bucket": "electricity",
+  "enabled": false,
+  "interval_minutes": 60
+}
