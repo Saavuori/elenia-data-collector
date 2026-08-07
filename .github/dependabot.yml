@@ -1,0 +1,102 @@
+version: 2
+
+# Rust backend + Vite frontend, one Dockerfile, one compose file. The same
+# layout as the other two data collectors, so this config is deliberately
+# identical to theirs — diff them before changing one on its own.
+#
+# Every entry carries a 3-day cooldown: a version that gets yanked shortly
+# after publishing never reaches a PR.
+
+updates:
+  # ---- Rust backend ----
+  - package-ecosystem: cargo
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Helsinki
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: [dependencies, rust]
+    cooldown:
+      default-days: 3
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+
+  # ---- Vite frontend ----
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Helsinki
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+    labels: [dependencies, frontend]
+    cooldown:
+      default-days: 3
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  # ---- Dockerfile base images ----
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Helsinki
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: [dependencies, docker]
+    cooldown:
+      default-days: 3
+    groups:
+      docker-minor-patch:
+        update-types: [minor, patch]
+
+  # ---- compose service images ----
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Helsinki
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: [dependencies, docker]
+    cooldown:
+      default-days: 3
+    ignore:
+      # Our own images are pinned to :latest by design — the host pulls them, so a
+      # PR bumping a tag that never moves is pure noise.
+      # containrrr/watchtower is third-party and stays in scope.
+      - dependency-name: ghcr.io/saavuori/*
+    groups:
+      compose-minor-patch:
+        update-types: [minor, patch]
+
+  # ---- GitHub Actions ----
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Helsinki
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: [dependencies, ci]
+    cooldown:
+      default-days: 3
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
