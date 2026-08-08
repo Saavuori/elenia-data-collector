@@ -462,7 +462,9 @@ const UsageView: React.FC = () => {
       ? (consumption * spotPrice) / 100
       : null;
 
-    let timeLabel = '';
+    // No initialiser: every path through the try/catch below assigns one, and
+    // eslint 10's no-useless-assignment flags the dead '' if it is there.
+    let timeLabel: string;
     try {
       const itemDate = new Date(item.start ?? '');
       if (daysDiff <= 1) {
