@@ -26,7 +26,7 @@ jobs:
         working-directory: backend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # The Dockerfile builds on rust:alpine, i.e. current stable.
       - name: Install Rust
@@ -54,7 +54,7 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # Matches the frontend-builder stage in the Dockerfile. Bump both together.
       - name: Set up Node
