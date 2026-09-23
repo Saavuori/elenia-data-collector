@@ -881,12 +881,19 @@ fn floor_to(ts: DateTime<Utc>, minutes: u32) -> DateTime<Utc> {
         .unwrap_or(ts)
 }
 
+/// Shorten a response body for an error message. Elenia's bodies are UTF-8
+/// with Finnish text in them, so the cut backs off to a character boundary —
+/// slicing mid-character would panic inside the request handler.
 fn truncate(s: &str) -> String {
-    if s.len() > 400 {
-        format!("{}…", &s[..400])
-    } else {
-        s.to_string()
+    const MAX: usize = 400;
+    if s.len() <= MAX {
+        return s.to_string();
     }
+    let mut end = MAX;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &s[..end])
 }
 
 fn parse_naive(s: &str) -> Option<NaiveDateTime> {
@@ -1159,6 +1166,16 @@ mod tests {
         assert_eq!(floor_to(ts, 15).to_rfc3339(), "2026-07-26T18:00:00+00:00");
         let ts = parse_timestamp("2026-07-26T18:59:59Z").unwrap();
         assert_eq!(floor_to(ts, 15).to_rfc3339(), "2026-07-26T18:45:00+00:00");
+    }
+
+    #[test]
+    fn truncate_never_splits_a_multibyte_character() {
+        // 399 ASCII bytes put the two-byte "ä" across the 400-byte cut.
+        let body = format!("{}äö", "x".repeat(399));
+        let cut = truncate(&body);
+        assert!(cut.starts_with(&"x".repeat(399)));
+        assert!(cut.ends_with('…'));
+        assert_eq!(truncate("lyhyt virhe"), "lyhyt virhe");
     }
 
     #[test]
