@@ -183,7 +183,7 @@ pub struct EleniaClient {
     metering_points: Vec<MeteringPoint>,
     selected_gsrn: Option<String>,
     /// Cached hourly spot prices per calendar year (Helsinki), keyed by year.
-    price_cache: HashMap<i32, Vec<(DateTime<Utc>, f64)>>,
+    price_cache: HashMap<i32, CachedPrices>,
 }
 
 impl EleniaClient {
@@ -804,43 +804,83 @@ impl EleniaClient {
             .collect())
     }
 
-    /// Hourly prices for a whole year. Cached — this is a large response.
-    async fn fetch_market_prices_year(&mut self, year: i32) -> Result<&Vec<(DateTime<Utc>, f64)>> {
-        if !self.price_cache.contains_key(&year) {
-            let res = self
-                .client
-                .get(format!("{}/market_prices", SGP_API))
-                .query(&[("year", year.to_string())])
-                .header("Accept", "application/json")
-                .send()
-                .await?;
-
-            let status = res.status();
-            let body = res.text().await?;
-            if !status.is_success() {
-                return Err(anyhow!("market_prices failed ({})", status));
+    /// Hourly prices for a whole year. Cached — this is a large response —
+    /// but the current year keeps growing as each day-ahead auction is
+    /// published, so its entry is refetched once it is older than
+    /// `PRICE_CACHE_TTL`. A failed refresh falls back to the stale entry.
+    async fn fetch_market_prices_year(&mut self, year: i32) -> Result<&[(DateTime<Utc>, f64)]> {
+        let now = Utc::now();
+        let fresh = self
+            .price_cache
+            .get(&year)
+            .is_some_and(|c| price_cache_is_fresh(year, c.fetched_at, now));
+        if !fresh {
+            match self.download_market_prices_year(year).await {
+                Ok(prices) => {
+                    self.price_cache.insert(
+                        year,
+                        CachedPrices {
+                            fetched_at: now,
+                            prices,
+                        },
+                    );
+                }
+                Err(e) if self.price_cache.contains_key(&year) => {
+                    tracing::warn!("Keeping cached {} spot prices, refresh failed: {}", year, e);
+                }
+                Err(e) => return Err(e),
             }
+        }
+        Ok(&self.price_cache[&year].prices)
+    }
 
-            // { "<month>": { "<day>": [ { t_utc, v } ] } }
-            let raw: HashMap<String, HashMap<String, Vec<MarketPriceHour>>> =
-                serde_json::from_str(&body)
-                    .with_context(|| format!("Could not decode prices: {}", truncate(&body)))?;
+    async fn download_market_prices_year(&self, year: i32) -> Result<Vec<(DateTime<Utc>, f64)>> {
+        let res = self
+            .client
+            .get(format!("{}/market_prices", SGP_API))
+            .query(&[("year", year.to_string())])
+            .header("Accept", "application/json")
+            .send()
+            .await?;
 
-            let mut list = Vec::new();
-            for days in raw.values() {
-                for hours in days.values() {
-                    for h in hours {
-                        if let (Some(ts), Some(v)) = (parse_timestamp(&h.t_utc), h.v) {
-                            list.push((ts, v));
-                        }
+        let status = res.status();
+        let body = res.text().await?;
+        if !status.is_success() {
+            return Err(anyhow!("market_prices failed ({})", status));
+        }
+
+        // { "<month>": { "<day>": [ { t_utc, v } ] } }
+        let raw: HashMap<String, HashMap<String, Vec<MarketPriceHour>>> =
+            serde_json::from_str(&body)
+                .with_context(|| format!("Could not decode prices: {}", truncate(&body)))?;
+
+        let mut list = Vec::new();
+        for days in raw.values() {
+            for hours in days.values() {
+                for h in hours {
+                    if let (Some(ts), Some(v)) = (parse_timestamp(&h.t_utc), h.v) {
+                        list.push((ts, v));
                     }
                 }
             }
-            list.sort_by_key(|(t, _)| *t);
-            self.price_cache.insert(year, list);
         }
-        Ok(self.price_cache.get(&year).unwrap())
+        list.sort_by_key(|(t, _)| *t);
+        Ok(list)
     }
+}
+
+/// How long a still-growing year of hourly prices is trusted before refetching.
+const PRICE_CACHE_TTL: Duration = Duration::hours(1);
+
+struct CachedPrices {
+    fetched_at: DateTime<Utc>,
+    prices: Vec<(DateTime<Utc>, f64)>,
+}
+
+/// A year's price list is final once it was fetched after that Helsinki year
+/// ended; until then it only holds the days auctioned so far.
+fn price_cache_is_fresh(year: i32, fetched_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+    fetched_at.with_timezone(&Helsinki).year() > year || now - fetched_at < PRICE_CACHE_TTL
 }
 
 // ---------------------------------------------------------------------------
@@ -1166,6 +1206,20 @@ mod tests {
         assert_eq!(floor_to(ts, 15).to_rfc3339(), "2026-07-26T18:00:00+00:00");
         let ts = parse_timestamp("2026-07-26T18:59:59Z").unwrap();
         assert_eq!(floor_to(ts, 15).to_rfc3339(), "2026-07-26T18:45:00+00:00");
+    }
+
+    #[test]
+    fn current_year_prices_expire_but_finished_years_do_not() {
+        let at = |s: &str| parse_timestamp(s).unwrap();
+        // Fetched mid-2026: the 2026 list is still growing.
+        let fetched = at("2026-07-25T09:00:00Z");
+        assert!(price_cache_is_fresh(2026, fetched, at("2026-07-25T09:59:00Z")));
+        assert!(!price_cache_is_fresh(2026, fetched, at("2026-07-25T10:01:00Z")));
+        // 2025 had ended when it was fetched, so it never goes stale.
+        assert!(price_cache_is_fresh(2025, fetched, at("2027-01-01T00:00:00Z")));
+        // 2026-12-31T22:30Z is already 2027 in Helsinki: 2026 is complete.
+        let new_year = at("2026-12-31T22:30:00Z");
+        assert!(price_cache_is_fresh(2026, new_year, at("2027-03-01T00:00:00Z")));
     }
 
     #[test]
