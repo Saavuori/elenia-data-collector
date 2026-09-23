@@ -74,7 +74,7 @@ stale jar breaks the CSRF handshake.
 
 Session upkeep is two-layered and both layers must keep working:
 - a background task in `main.rs` re-logs in every 60 minutes;
-- `is_session_error()` + `relogin_if_needed()` catch an expired token mid-request,
+- `is_session_error()` + `login_from_saved()` catch an expired token mid-request,
   re-login once and retry. `is_session_error` matches on the error *strings*
   `"No access token"` / `"login required"`, so don't reword those messages in
   `elenia_client.rs` without updating the matcher.

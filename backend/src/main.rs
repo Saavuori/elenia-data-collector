@@ -136,33 +136,18 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let mut client = EleniaClient::new().expect("Failed to create EleniaClient");
-    let mut logged_in = false;
-
-    // Auto-login from saved credentials
-    if let Some(creds) = load_credentials() {
-        tracing::info!(
-            "Found saved credentials for '{}', attempting auto-login…",
-            creds.username
-        );
-        client.set_selected_gsrn(creds.selected_gsrn.clone());
-        match client.login(&creds.username, &creds.password).await {
-            Ok(()) => {
-                tracing::info!("Auto-login successful");
-                logged_in = true;
-            }
-            Err(e) => tracing::warn!("Auto-login failed ({}), will require manual login", e),
-        }
-    } else {
-        tracing::info!("No saved credentials found — manual login required");
-    }
-
-    let shared_state = Arc::new(Mutex::new(AppState {
-        client,
-        logged_in,
+    let mut state = AppState {
+        client: EleniaClient::new().expect("Failed to create EleniaClient"),
+        logged_in: false,
         influx_last_sync: None,
         influx_error: None,
-    }));
+    };
+    if login_from_saved(&mut state).await {
+        tracing::info!("Auto-login successful");
+    } else {
+        tracing::info!("No working saved credentials — manual login required");
+    }
+    let shared_state = Arc::new(Mutex::new(state));
 
     // ── Background: session refresh every 60 min ───────────────────────────
     // The measurement-API service token is valid for ~3 h.
@@ -172,17 +157,9 @@ async fn main() {
             let interval = tokio::time::Duration::from_secs(60 * 60);
             loop {
                 tokio::time::sleep(interval).await;
-                if let Some(creds) = load_credentials() {
-                    tracing::info!("Session refresh: re-logging in…");
-                    let mut st = s.lock().await;
-                    st.client.set_selected_gsrn(creds.selected_gsrn.clone());
-                    match st.client.login(&creds.username, &creds.password).await {
-                        Ok(()) => {
-                            st.logged_in = true;
-                            tracing::info!("Session refresh: success");
-                        }
-                        Err(e) => tracing::warn!("Session refresh failed: {}", e),
-                    }
+                let mut st = s.lock().await;
+                if login_from_saved(&mut st).await {
+                    tracing::info!("Session refresh: success");
                 }
             }
         });
@@ -283,18 +260,13 @@ async fn run_influx_sync(
             if !st.logged_in {
                 return Err(anyhow::anyhow!("Not logged in"));
             }
-            st.client
-                .get_consumption(date, date, Resolution::FiveMinute)
-                .await?
+            consumption_with_relogin(&mut st, date, date, Resolution::FiveMinute).await?
         };
 
         if data.series.is_empty() {
             tracing::info!("No 5 min data for {} — falling back to 15 min", date);
             let mut st = state.lock().await;
-            data = st
-                .client
-                .get_consumption(date, date, Resolution::Quarter)
-                .await?;
+            data = consumption_with_relogin(&mut st, date, date, Resolution::Quarter).await?;
         }
 
         let gsrn = data.gsrn.clone().unwrap_or_default();
@@ -320,27 +292,45 @@ fn is_session_error(e: &anyhow::Error) -> bool {
     msg.contains("No access token") || msg.contains("login required")
 }
 
-async fn relogin_if_needed(state: &mut AppState) -> bool {
-    match load_credentials() {
-        Some(creds) => {
-            tracing::info!("Session expired — on-demand re-login…");
-            state.client.set_selected_gsrn(creds.selected_gsrn.clone());
-            match state.client.login(&creds.username, &creds.password).await {
-                Ok(()) => {
-                    state.logged_in = true;
-                    tracing::info!("Re-login ok");
-                    true
-                }
-                Err(e) => {
-                    tracing::warn!("Re-login failed: {}", e);
-                    false
-                }
-            }
+/// Log in with the credentials saved in `credentials.json`. The one path used
+/// by startup auto-login, the hourly refresh and on-demand re-login, so they
+/// cannot drift apart. Returns whether the client now holds a session.
+async fn login_from_saved(state: &mut AppState) -> bool {
+    let Some(creds) = load_credentials() else {
+        tracing::debug!("No saved credentials to log in with");
+        return false;
+    };
+    tracing::info!("Logging in to Elenia as '{}'…", creds.username);
+    state.client.set_selected_gsrn(creds.selected_gsrn);
+    match state.client.login(&creds.username, &creds.password).await {
+        Ok(()) => {
+            state.logged_in = true;
+            true
         }
-        None => {
-            tracing::warn!("Re-login: no credentials.json");
+        Err(e) => {
+            tracing::warn!("Login with saved credentials failed: {}", e);
             false
         }
+    }
+}
+
+/// `get_consumption`, retried once after a re-login when the service token
+/// turns out to have expired mid-request.
+async fn consumption_with_relogin(
+    state: &mut AppState,
+    start: NaiveDate,
+    stop: NaiveDate,
+    resolution: Resolution,
+) -> anyhow::Result<ConsumptionData> {
+    match state.client.get_consumption(start, stop, resolution).await {
+        Err(e) if is_session_error(&e) => {
+            tracing::warn!("Session expired during get_consumption — re-logging in");
+            if !login_from_saved(state).await {
+                return Err(e);
+            }
+            state.client.get_consumption(start, stop, resolution).await
+        }
+        result => result,
     }
 }
 
@@ -445,23 +435,7 @@ async fn get_consumption_handler(
     }
 
     let resolution = Resolution::parse(params.resolution.as_deref());
-
-    match state
-        .client
-        .get_consumption(params.start, params.stop, resolution)
-        .await
-    {
-        Ok(d) => return Ok(Json(d)),
-        Err(e) if is_session_error(&e) => {
-            tracing::warn!("get_consumption session expired, re-logging in");
-            relogin_if_needed(&mut state).await;
-        }
-        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
-    }
-
-    state
-        .client
-        .get_consumption(params.start, params.stop, resolution)
+    consumption_with_relogin(&mut state, params.start, params.stop, resolution)
         .await
         .map(Json)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
@@ -480,18 +454,13 @@ async fn get_meter_reading_handler(
         .day
         .unwrap_or_else(|| Utc::now().with_timezone(&Helsinki).date_naive());
 
-    match state.client.get_meter_reading(day).await {
-        Ok(d) => return Ok(Json(d)),
-        Err(e) if is_session_error(&e) => {
-            relogin_if_needed(&mut state).await;
+    let result = match state.client.get_meter_reading(day).await {
+        Err(e) if is_session_error(&e) && login_from_saved(&mut state).await => {
+            state.client.get_meter_reading(day).await
         }
-        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
-    }
-
-    state
-        .client
-        .get_meter_reading(day)
-        .await
+        result => result,
+    };
+    result
         .map(Json)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
