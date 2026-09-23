@@ -5,12 +5,12 @@
 //!
 //! 1. `GET  api.aina.elenia.fi/api/csrf-token`                      → csrf_token cookie
 //! 2. `POST api.aina.elenia.fi/api/auth/login/credentials-authentication`
-//!                                                                  → session cookies
+//!    → session cookies
 //! 3. `GET  api.aina.elenia.fi/api/customerships`                    → userId
 //! 4. `POST api.aina.elenia.fi/api/auth/access/token/{userId}/v2/bearer`
-//!                                                                  → applications token
+//!    → applications token
 //! 5. `GET  public.sgp-prod.aws.elenia.fi/api/gen/customer_data_and_token`
-//!                                                                  → service token + metering points
+//!    → service token + metering points
 //! 6. `GET  .../api/gen/meter_reading_yh`                            → consumption series
 //!
 //! Spot prices come from Elenia's public (unauthenticated) `market_prices`
@@ -44,6 +44,11 @@ const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
                           Chrome/141.0.0.0 Safari/537.36";
 
 /// Finnish VAT on electricity was raised from 24 % to 25.5 % on 2024-09-01.
+///
+/// The temporary 10 % rate (2022-12-01 … 2023-04-30) is deliberately absent:
+/// Elenia's published prices kept using 24 % through that period (checked
+/// against Elering's Nord Pool feed, including negative hours), so dividing
+/// by 1.24 is what recovers the VAT-free price.
 fn vat_multiplier(ts: DateTime<Utc>) -> f64 {
     let local = ts.with_timezone(&Helsinki);
     if local.year() < 2024 || (local.year() == 2024 && local.month() < 9) {
@@ -219,10 +224,10 @@ impl EleniaClient {
     }
 
     pub async fn select_gsrn(&mut self, gsrn: Option<String>) -> Result<()> {
-        if let Some(ref g) = gsrn {
-            if !self.metering_points.iter().any(|m| &m.gsrn == g) {
-                return Err(anyhow!("Unknown metering point {}", g));
-            }
+        if let Some(ref g) = gsrn
+            && !self.metering_points.iter().any(|m| &m.gsrn == g)
+        {
+            return Err(anyhow!("Unknown metering point {}", g));
         }
         self.selected_gsrn = gsrn;
         Ok(())
@@ -602,7 +607,7 @@ impl EleniaClient {
             });
         }
 
-        out.retain(|s| in_range(s.start, start, stop));
+        retain_in_range(&mut out, start, stop);
         Ok(out)
     }
 
@@ -622,7 +627,7 @@ impl EleniaClient {
             out.extend(flatten_meter_reading(raw, Duration::minutes(15)));
             day += Duration::days(1);
         }
-        out.retain(|s| in_range(s.start, start, stop));
+        retain_in_range(&mut out, start, stop);
         out.sort_by_key(|s| s.start);
         Ok(out)
     }
@@ -641,7 +646,7 @@ impl EleniaClient {
                 .await?;
             out.extend(flatten_meter_reading(raw, Duration::hours(1)));
         }
-        out.retain(|s| in_range(s.start, start, stop));
+        retain_in_range(&mut out, start, stop);
         out.sort_by_key(|s| s.start);
         Ok(out)
     }
@@ -652,40 +657,23 @@ impl EleniaClient {
         year_param: &str,
         timestep: &str,
     ) -> Result<MeterReadingYh> {
-        let token = self.service_token()?;
-        let url = format!("{}/meter_reading_yh", SGP_API);
         tracing::info!(
             "Fetching {} consumption for {} (gsrn {})",
             timestep,
             year_param,
             point.gsrn
         );
-
-        let res = self
-            .client
-            .get(&url)
-            .query(&[
+        self.get_measurement(
+            "meter_reading_yh",
+            &[
                 ("gsrn", point.gsrn.as_str()),
                 ("customer_ids", point.customer_id.as_str()),
                 ("year", year_param),
                 ("timestep", timestep),
-            ])
-            .header("Authorization", format!("Bearer {}", token))
-            .header("Accept", "application/json")
-            .send()
-            .await?;
-
-        let status = res.status();
-        let body = res.text().await?;
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-            return Err(anyhow!("No access token — session expired ({})", status));
-        }
-        if !status.is_success() {
-            return Err(anyhow!("Consumption fetch failed ({}): {}", status, body));
-        }
-
-        serde_json::from_str(&body)
-            .with_context(|| format!("Could not decode consumption JSON: {}", truncate(&body)))
+            ],
+            "consumption",
+        )
+        .await
     }
 
     /// Latest 5-minute readings for a day — raw meter data, used for the
@@ -699,16 +687,32 @@ impl EleniaClient {
         point: &MeteringPoint,
         day: NaiveDate,
     ) -> Result<serde_json::Value> {
-        let token = self.service_token()?;
-
-        let res = self
-            .client
-            .get(format!("{}/meter_reading", SGP_API))
-            .query(&[
+        self.get_measurement(
+            "meter_reading",
+            &[
                 ("customer_ids", point.customer_id.as_str()),
                 ("gsrn", point.gsrn.as_str()),
                 ("day", &day.format("%Y-%m-%d").to_string()),
-            ])
+            ],
+            "meter reading",
+        )
+        .await
+    }
+
+    /// GET a measurement-API endpoint with the service token and decode the
+    /// JSON body. A 401/403 is reported as "No access token", which is what
+    /// `is_session_error` in main.rs matches on to trigger a re-login.
+    async fn get_measurement<T: serde::de::DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        query: &[(&str, &str)],
+        what: &str,
+    ) -> Result<T> {
+        let token = self.service_token()?;
+        let res = self
+            .client
+            .get(format!("{}/{}", SGP_API, endpoint))
+            .query(query)
             .header("Authorization", format!("Bearer {}", token))
             .header("Accept", "application/json")
             .send()
@@ -720,10 +724,10 @@ impl EleniaClient {
             return Err(anyhow!("No access token — session expired ({})", status));
         }
         if !status.is_success() {
-            return Err(anyhow!("Meter reading fetch failed ({}): {}", status, body));
+            return Err(anyhow!("Elenia {} request failed ({}): {}", what, status, truncate(&body)));
         }
         serde_json::from_str(&body)
-            .with_context(|| format!("Could not decode meter reading JSON: {}", truncate(&body)))
+            .with_context(|| format!("Could not decode {} JSON: {}", what, truncate(&body)))
     }
 
     // -----------------------------------------------------------------------
@@ -748,10 +752,10 @@ impl EleniaClient {
         // 5-minute intervals fall inside a 15-minute price bucket, so round
         // the interval start down before looking the price up.
         for item in series.iter_mut() {
-            if let Some(ts) = item.start {
-                if let Some(v) = prices.get(&floor_to(ts, 15)) {
-                    set_price(item, *v);
-                }
+            if let Some(ts) = item.start
+                && let Some(v) = prices.get(&floor_to(ts, 15))
+            {
+                set_price(item, *v);
             }
         }
         Ok(())
@@ -771,10 +775,10 @@ impl EleniaClient {
             }
         }
         for item in series.iter_mut() {
-            if let Some(ts) = item.start {
-                if let Some(v) = prices.get(&ts) {
-                    set_price(item, *v);
-                }
+            if let Some(ts) = item.start
+                && let Some(v) = prices.get(&ts)
+            {
+                set_price(item, *v);
             }
         }
         Ok(())
@@ -1006,11 +1010,11 @@ fn set_price(item: &mut ConsumptionSeries, price_with_vat: f64) {
     item.electricity_spot_prices = Some(price_with_vat / vat_multiplier(ts));
 }
 
-/// Is `ts` inside the inclusive Helsinki date range [start, stop]?
-fn in_range(ts: Option<DateTime<Utc>>, start: NaiveDate, stop: NaiveDate) -> bool {
-    let Some(ts) = ts else { return false };
+/// Keep the intervals that start inside the inclusive Helsinki date range
+/// [start, stop]; intervals without a start are dropped.
+fn retain_in_range(series: &mut Vec<ConsumptionSeries>, start: NaiveDate, stop: NaiveDate) {
     let (from, to) = helsinki_range(start, stop);
-    ts >= from && ts < to
+    series.retain(|s| s.start.is_some_and(|ts| ts >= from && ts < to));
 }
 
 /// Helsinki local midnight of `start` .. local midnight after `stop`, in UTC.
