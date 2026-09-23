@@ -12,7 +12,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { format, subDays, parseISO } from 'date-fns';
+import { differenceInCalendarDays, format, subDays, parseISO } from 'date-fns';
 import { Button, makeStyles, mergeClasses, shorthands } from '@fluentui/react-components';
 import {
   ChevronLeft24Regular,
@@ -37,6 +37,11 @@ import { Card, Row, RowList, SegmentedControl, StatTile, EmptyState, Sheet } fro
 // ── Ranges & resolutions ──────────────────────────────────────────────────────
 
 const today = () => format(new Date(), 'yyyy-MM-dd');
+
+/** Number of calendar days in the inclusive range [start, stop]. Counted on
+ *  the calendar rather than in milliseconds so DST days and the time of day
+ *  cannot shift the result. */
+const daySpan = (start: Date, stop: Date) => differenceInCalendarDays(stop, start) + 1;
 
 type PresetKey = 'today' | 'yesterday' | '7d' | '30d' | '12m';
 
@@ -357,15 +362,8 @@ const UsageView: React.FC = () => {
   const [showCost, setShowCost] = useState(true);
   const [resolutionOverride, setResolutionOverride] = useState<Resolution | null>(null);
 
-  const daysDiff = (() => {
-    try {
-      const start = parseISO(startDate);
-      const stop = parseISO(stopDate);
-      return Math.round((stop.getTime() - start.getTime()) / (1000 * 3600 * 24)) + 1;
-    } catch {
-      return 1;
-    }
-  })();
+  // Both dates come from date inputs or presets, so they are always valid ISO days.
+  const daysDiff = daySpan(parseISO(startDate), parseISO(stopDate));
 
   const resolution: Resolution = resolutionOverride || (
     daysDiff <= 1 ? '5min' :
@@ -391,7 +389,7 @@ const UsageView: React.FC = () => {
 
   // A manually picked resolution can become invalid when the range grows.
   const clearImpossibleOverride = (start: Date, stop: Date) => {
-    const diff = Math.round((stop.getTime() - start.getTime()) / (1000 * 3600 * 24)) + 1;
+    const diff = daySpan(start, stop);
     if ((diff > 7 && resolutionOverride === 'quarter') ||
         (diff > 3 && resolutionOverride === '5min')) {
       setResolutionOverride(null);
@@ -426,18 +424,13 @@ const UsageView: React.FC = () => {
   const shiftPeriod = (direction: -1 | 1) => {
     const start = parseISO(startDate);
     const stop = parseISO(stopDate);
-    const days = Math.round((stop.getTime() - start.getTime()) / (1000 * 3600 * 24)) + 1;
-    let newStart = subDays(start, -days * direction);
-    let newStop = subDays(stop, -days * direction);
-
-    const now = new Date();
-    if (direction === 1 && newStop > now) {
-      const shift = Math.round((now.getTime() - stop.getTime()) / (1000 * 3600 * 24));
-      newStart = subDays(start, -shift);
-      newStop = now;
-    }
-    setStartDate(format(newStart, 'yyyy-MM-dd'));
-    setStopDate(format(newStop, 'yyyy-MM-dd'));
+    let shift = daySpan(start, stop) * direction;
+    // Stepping forward stops at today, but keeps the range the same length.
+    // Counting in whole calendar days matters: rounding milliseconds against
+    // the current time of day shrank the range by a day every afternoon.
+    if (direction === 1) shift = Math.min(shift, differenceInCalendarDays(new Date(), stop));
+    setStartDate(format(subDays(start, -shift), 'yyyy-MM-dd'));
+    setStopDate(format(subDays(stop, -shift), 'yyyy-MM-dd'));
   };
 
   const isPeriodEndLatest = parseISO(stopDate) >= parseISO(today());

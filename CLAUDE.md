@@ -74,7 +74,7 @@ stale jar breaks the CSRF handshake.
 
 Session upkeep is two-layered and both layers must keep working:
 - a background task in `main.rs` re-logs in every 60 minutes;
-- `is_session_error()` + `relogin_if_needed()` catch an expired token mid-request,
+- `is_session_error()` + `login_from_saved()` catch an expired token mid-request,
   re-login once and retry. `is_session_error` matches on the error *strings*
   `"No access token"` / `"login required"`, so don't reword those messages in
   `elenia_client.rs` without updating the matcher.
@@ -105,7 +105,8 @@ value is derived by dividing with the rate in force at that timestamp
 (`vat_multiplier`: 1.24 before 2024-09-01, 1.255 after). Prices are attached to
 intervals *before* aggregation so day/month prices are consumption-weighted
 (kWh × price still equals real cost). Hourly prices are cached per year in
-`price_cache`.
+`price_cache`; a year that was still running when fetched is refetched after an
+hour, because each day-ahead auction adds to it.
 
 **Persistence** is two plaintext JSON files in the process working directory,
 mounted as volumes in production and gitignored: `credentials.json` (Elenia

@@ -132,7 +132,11 @@ pub async fn write_points(config: &InfluxConfig, lines: &str) -> Result<usize> {
     }
     let count = lines.lines().filter(|l| !l.trim().is_empty()).count();
 
-    let client = Client::new();
+    // Without a timeout a server that accepts the connection but never
+    // answers would stall the background collector's loop for good.
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
     let url = format!("{}/api/v2/write", config.url.trim_end_matches('/'));
     let r = client
         .post(&url)
