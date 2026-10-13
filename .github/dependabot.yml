@@ -7,6 +7,8 @@ version: 2
 # Every entry carries a 3-day cooldown: a version that gets yanked shortly
 # after publishing never reaches a PR.
 
+# Majors are ignored on every entry: they are upgraded by hand rather than
+# proposed as PRs that sit open waiting for a review.
 updates:
   # ---- Rust backend ----
   - package-ecosystem: cargo
@@ -22,6 +24,9 @@ updates:
     labels: [dependencies, rust]
     cooldown:
       default-days: 3
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
@@ -41,6 +46,9 @@ updates:
     labels: [dependencies, frontend]
     cooldown:
       default-days: 3
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
     groups:
       npm-minor-patch:
         update-types: [minor, patch]
@@ -58,6 +66,9 @@ updates:
     labels: [dependencies, docker]
     cooldown:
       default-days: 3
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
     groups:
       docker-minor-patch:
         update-types: [minor, patch]
@@ -76,6 +87,8 @@ updates:
     cooldown:
       default-days: 3
     ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
       # Our own images are pinned to :latest by design — the host pulls them, so a
       # PR bumping a tag that never moves is pure noise.
       # containrrr/watchtower is third-party and stays in scope.
@@ -97,6 +110,9 @@ updates:
     labels: [dependencies, ci]
     cooldown:
       default-days: 3
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
     groups:
       actions-minor-patch:
         update-types: [minor, patch]
